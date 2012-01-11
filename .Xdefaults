@@ -1,0 +1,8 @@
+URxvt.perl-lib: /home/user/.urxvt/
+URxvt.perl-ext: juick
+URxvt.juickLauncher: juickopen
+URxvt.keysym.C-o: perl:juick:activate_tag_mode
+URxvt.keysym.C-f: perl:juick:activate_nick_mode
+URxvt.keysym.C-s: perl:juick:activate_post_mode
+URxvt.underlineURLs: false
+ 

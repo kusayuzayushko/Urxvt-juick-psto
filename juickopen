@@ -1,0 +1,8 @@
+#!/bin/sh
+ 
+case "$*" in
+    \**) /usr/bin/firefox http://juick.com/tag?tag=$(echo "$*" | sed 's/*//') ;;
+    \#*) /usr/bin/firefox http://juick.com/$(echo "$*" | sed 's/#//' | sed 's/\//#/') ;;
+    \@*) /usr/bin/firefox http://juick.com/$(echo "$*" | sed 's/@//') ;;
+esac
+ 

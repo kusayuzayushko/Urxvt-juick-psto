@@ -1,0 +1,367 @@
+#!/usr/bin/perl
+ 
+#my $tag_matcher =
+#    qr{
+#        (\*[a-zA-Zа-яА-Я0-9_!?-]+)
+#    }x;
+ 
+my $nick_matcher =
+    qr{
+       ((\@[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,4})|(\@[a-zA-Z0-9_-]{2,}))
+    }x;
+ 
+my $post_matcher =
+    qr{
+        (\#[a-zA-Z0-9]{5,}(/[0-9]{1,4})?)
+    }x;
+ 
+sub on_start {
+    my ($term) = @_;
+ 
+    $term->{have_Clipboard} = eval { require Clipboard; };
+    if ($term->{have_Clipboard}) {
+        import Clipboard;
+    }
+ 
+    $term->{juickopen} = $term->x_resource ("juickLauncher");
+ 
+    ()
+}
+ 
+sub on_line_update {
+    my ($term, $row) = @_;
+ 
+    my $line = $term->line ($row);
+    my $text = $line->t;
+ 
+    while ($text =~ /\s($nick_matcher|$post_matcher)/g) {
+        my $rend = $line->r;
+ 
+        if ($term->x_resource ("underlineURLs") eq "true") {
+           $_ |= urxvt::RS_Uline
+           for @{$rend}[ $-[1] .. $+[1] - 1];
+           $line->r ($rend);
+        }
+    }
+ 
+    ()
+}
+ 
+#my $tag_mode_active = 0;
+my $nick_mode_active = 0;
+my $post_mode_active = 0;
+my %mod = ( 'control' => 0, 'shift' => 0 );
+my $url_selected = -1;
+my @url_db = ();
+ 
+#sub do_scan_for_tag {
+#    my ($term) = @_;
+ 
+#    @url_db = ();
+ 
+#    my $row_start = $term->top_row;
+#    my $row_end = $term->nrow;
+ 
+#    for (my $row=$row_start; $row<=$row_end; $row++) {
+ 
+#        my $line = $term->line ($row);
+#        my $text = $line->t;
+ 
+#        while ($text =~ /\s$tag_matcher/g) {
+#            my $rend = $line->r;
+#            my $url = $1;
+ 
+#            my %h = ( 'row'      => $row,
+#                      'col_from' => $-[1],
+#                      'col_to'   => $+[1] - 1,
+#                      'url'      => $url);
+#            push @url_db, \%h;
+#        }
+#    }
+ 
+#    return $#url_db + 1;
+#}
+ 
+sub do_scan_for_nick {
+    my ($term) = @_;
+ 
+    @url_db = ();
+ 
+    my $row_start = $term->top_row;
+    my $row_end = $term->nrow;
+ 
+    for (my $row=$row_start; $row<=$row_end; $row++) {
+ 
+        my $line = $term->line ($row);
+        my $text = $line->t;
+ 
+        while ($text =~ /\s($nick_matcher)/g) {
+            my $rend = $line->r;
+            my $url = $1;
+ 
+            my %h = ( 'row'      => $row,
+                      'col_from' => $-[1],
+                      'col_to'   => $+[1] - 1,
+                      'url'      => $url );
+            push @url_db, \%h;
+        }
+    }
+ 
+    return $#url_db + 1;
+}
+ 
+sub do_scan_for_post {
+    my ($term) = @_;
+ 
+    @url_db = ();
+ 
+    my $row_start = $term->top_row;
+    my $row_end = $term->nrow;
+ 
+    for (my $row=$row_start; $row<=$row_end; $row++) {
+ 
+        my $line = $term->line ($row);
+        my $text = $line->t;
+ 
+        while ($text =~ /\s($post_matcher)/g) {
+            my $rend = $line->r;
+            my $url = $1;
+ 
+            my %h = ( 'row'      => $row,
+                      'col_from' => $-[1],
+                      'col_to'   => $+[1] - 1,
+                      'url'      => $url );
+            push @url_db, \%h;
+        }
+    }
+ 
+    return $#url_db + 1;
+}
+ 
+sub on_user_command {
+    my ($term, $cmd) = @_;
+ 
+#    $cmd eq "juick:activate_tag_mode"
+#        and activate_tag_mode($term);
+ 
+    $cmd eq "juick:activate_nick_mode"
+        and activate_nick_mode($term);
+ 
+    $cmd eq "juick:activate_post_mode"
+        and activate_post_mode($term);
+ 
+    ()
+}
+ 
+sub on_key_press {
+    my ($term, $event, $keysym, $octets) = @_;
+ 
+#    $tag_mode_active && return 1;
+    $nick_mode_active && return 1;
+    $post_mode_active && return 1;
+ 
+    ()
+}
+ 
+sub on_key_release {
+    my ($term, $event, $keysym, $octets) = @_;
+ 
+    if (($nick_mode_active) || ($post_mode_active)) {
+ 
+        my $ch = chr($keysym);
+ 
+        if (($keysym == 65307) || ($ch eq 'q')) {
+            deactivate_mode ($term);
+            return 1;
+ 
+        } elsif (($keysym == 65293) || ($ch eq 'o')) {
+           my $url = get_active_url($term);
+           $term->exec_async ($term->{juickopen} . ' ' . $url);
+           deactivate_mode ($term);
+           return 1;
+ 
+        } elsif (($ch eq 'j') || ($ch eq 'k')) {
+           my $dir = ($ch eq 'j') ? 1 : -1;
+           move_highlight ($term, $dir);
+ 
+        } elsif ($ch eq 'y') {
+            do_copy ($term);
+            deactivate_mode ($term);
+            return 1;
+ 
+        } elsif ($ch eq 'a') {
+           my $url = get_active_url($term);
+           $url =~ s/&/\\&/g;
+           ($term)->tt_write("$url ");
+           deactivate_mode ($term);
+           return 1;
+ 
+        } elsif ($ch eq 'p') {
+           my $url = get_active_url($term);
+           $url =~ s/\/[0-9]*//;
+           ($term)->tt_write("S $url");
+           deactivate_mode ($term);
+           return 1;
+ 
+        } elsif ($ch eq 'u') {
+           my $url = get_active_url($term);
+           $url =~ s/\/[0-9]*//;
+           ($term)->tt_write("U $url");
+           deactivate_mode ($term);
+           return 1;
+ 
+        } elsif ($ch eq 'i') {
+           my $url = get_active_url($term);
+           $url =~ s/\/[0-9]*//;
+           ($term)->tt_write("$url+");
+           deactivate_mode ($term);
+           return 1;
+
+        } elsif ($ch eq 'r') {
+		   my $url = get_active_url($term);
+		   $url =~ s/\/[0-9]*//;
+		   ($term)->tt_write("! $url");
+		   deactivate_mode ($term);
+		   return 1;
+
+		} elsif ($ch eq 'd') {
+		   my $url = get_active_url($term);
+		   $url =~ s/&/\\&/g;
+		   ($term)->tt_write("D $url");
+		   deactivate_mode ($term);
+		   return 1;
+		}
+ 
+        return 1;
+    }
+ 
+    ()
+}
+ 
+sub get_active_url {
+    my ($term) = @_;
+    my $max = $#url_db + 1;
+ 
+    return if $url_selected < 0 || $url_selected >= $max;
+    return if not defined $url_db[$url_selected];
+    my $o = $url_db[$url_selected];
+    my %h = %$o;
+ 
+    return $h{url};
+}
+ 
+sub do_copy {
+    my ($term) = @_;
+ 
+    my $text = get_active_url ($term);
+ 
+    if ($term->{have_Clipboard}) {
+        Clipboard->copy($text);
+    } else {
+        $text =~ s/\(["|><&()]\)/\\$1/;
+        system ("echo -n \"$text\" | xclip -i");
+    }
+}
+ 
+sub move_highlight {
+    my ($term, $dir) = @_;
+    my $max = $#url_db + 1;
+ 
+    do_highlight ($term, 0);
+ 
+    $url_selected = ($max + $url_selected + $dir) % $max;
+ 
+    do_highlight ($term, 1);
+ 
+    $term->want_refresh;
+}
+ 
+sub do_highlight {
+    my ($term, $enable) = @_;
+    my $max = $#url_db + 1;
+ 
+    return if $url_selected < 0 || $url_selected >= $max;
+    return if not defined $url_db[$url_selected];
+ 
+    my $o = $url_db[$url_selected];
+    my %h = %$o;
+ 
+    my $row = $h{row};
+    my $line = $term->line ($row);
+    my $text = $line->t;
+    my $rend = $line->r;
+ 
+    if ($enable) {
+        $_ |= urxvt::RS_RVid
+        for @{$rend}[ $h{col_from} .. $h{col_to}];
+ 
+        # make it visible
+        $term->view_start ( $row < 0 ? $row : 0 );
+    } else {
+        $_ &= ~urxvt::RS_RVid
+        for @{$rend}[ $h{col_from} .. $h{col_to}];
+    }
+ 
+    $line->r ($rend);
+}
+ 
+#sub activate_tag_mode {
+#    my ($term) = @_;
+ 
+#    if ($tag_mode_active) {
+ 
+#        move_highlight ($term, -1);
+ 
+#    } elsif ( do_scan_for_tag ($term) ) {
+ 
+#        $term->{save_view_start} = $term->view_start;
+#        move_highlight ($term, 0);
+#        $tag_mode_active=1 if ($url_selected > -1);
+#    }
+#}
+ 
+sub activate_nick_mode {
+    my ($term) = @_;
+ 
+    if ($nick_mode_active) {
+ 
+        move_highlight ($term, -1);
+ 
+    } elsif ( do_scan_for_nick ($term) ) {
+ 
+        $term->{save_view_start} = $term->view_start;
+        move_highlight ($term, 0);
+        $nick_mode_active=1 if ($url_selected > -1);
+    }
+}
+ 
+sub activate_post_mode {
+    my ($term) = @_;
+ 
+    if ($post_mode_active) {
+ 
+        move_highlight ($term, -1);
+ 
+    } elsif ( do_scan_for_post ($term) ) {
+ 
+        $term->{save_view_start} = $term->view_start;
+        move_highlight ($term, 0);
+        $post_mode_active=1 if ($url_selected > -1);
+ 
+    }
+}
+ 
+sub deactivate_mode {
+    my ($term) = @_;
+ 
+    do_highlight ($term, 0);
+ 
+    $nick_mode_active = 0;
+#    $tag_mode_active = 0;
+    $post_mode_active = 0;
+    $url_selected = -1;
+ 
+    $term->view_start ($term->{save_view_start});
+    $term->want_refresh;
+}
+ 
